@@ -23,17 +23,26 @@ def extractEdgeMap(heightMap):
 	horizontalEdges = []
 	verticalEdges = []
 
-	for yCoord in range(0, len(heightMap) + 1):
-		column = []
+	verticalEdges.append(["__"] * len(heightMap[0]))
+	for yCoord in range(0, len(heightMap)-1):
+		row = []
 		for xCoord in range(0, len(heightMap[0])):
-			column.append("__")
-		verticalEdges.append(column)
+			if abs(heightMap[yCoord][xCoord][0] - heightMap[yCoord+1][xCoord][0]) > 1:
+				row.append("__")
+			else:
+				row.append("")
+		verticalEdges.append(row)
+	verticalEdges.append(["__"] * len(heightMap[0]))
 
 	for yCoord in range(0, len(heightMap)):
-		column = []
-		for xCoord in range(0, len(heightMap[0]) + 1):
-			column.append("||")
-		horizontalEdges.append(column)
+		row = ["||"]
+		for xCoord in range(0, len(heightMap[0])-1):
+			if abs(heightMap[yCoord][xCoord][0] - heightMap[yCoord][xCoord+1][0]) > 1:
+				row.append("||")
+			else:
+				row.append("")
+		row.append("||")
+		horizontalEdges.append(row)
 
 	return (horizontalEdges, verticalEdges)
 
@@ -76,7 +85,6 @@ Given a heightmap and associated edgemap, use the console to print out a diagram
 """
 def printEdgeMap(heightMap, edgeMap):
 	print("\nEdgeMap: \n")
-
 	horizontalEdges = edgeMap[0]
 	verticalEdges = edgeMap[1]
 
@@ -84,22 +92,22 @@ def printEdgeMap(heightMap, edgeMap):
 	for yCoord in range(0, len(heightMap)):
 
 		for xCoord in range(0, len(verticalEdges[0])):
-			edgeMap += "\t" + verticalEdges[yCoord][xCoord] +"\t"
+			edgeMap += "\t" + str(verticalEdges[yCoord][xCoord]) + "\t"
+
 		edgeMap += "\n\n"
 		
-		for xCoord in range(0, len(horizontalEdges[0])-1):
-			if xCoord == 0:
-				edgeMap += horizontalEdges[yCoord][xCoord] + "\t"
-				edgeMap += str(heightMap[yCoord][xCoord][0])
-				edgeMap += "\t" +  horizontalEdges[yCoord][xCoord] + "\t"
-			else:
-				edgeMap += str(heightMap[yCoord][xCoord][0])
-				edgeMap += "\t" +  horizontalEdges[yCoord][xCoord] + "\t"
+		edgeMap += str(horizontalEdges[yCoord][0]) + "\t"
+		edgeMap += str(heightMap[yCoord][0][0])
+		edgeMap += "\t" +  str(horizontalEdges[yCoord][1]) + "\t"
+
+		for xCoord in range(1, len(horizontalEdges[0])-1):
+			edgeMap += str(heightMap[yCoord][xCoord][0])
+			edgeMap += "\t" +  str(horizontalEdges[yCoord][xCoord+1]) + "\t"
 				
-		edgeMap +="\n"
+		edgeMap +="\n\n"
 
 	for xCoord in range(0, len(verticalEdges[-1])):
-		edgeMap += "\t" + verticalEdges[-1][xCoord] +"\t"
+		edgeMap += "\t" + str(verticalEdges[-1][xCoord])+"\t"
 
 	print(edgeMap)
 
