@@ -14,6 +14,8 @@ inputs = (
 	("Creator: Matthew Barthet", "label"),
 	)
 
+NONSURFACE = [ 0, 17, 18, 31, 37, 38, 78, 175]
+
 def perform(level, box, options):
 	heightMap = extractHeightMap(level, box, options)
 	printHeightMap(heightMap)
@@ -35,13 +37,13 @@ def extractEdgeMap(heightMap):
 	verticalEdges.append(["__"] * len(heightMap[0]))
 
 	for yCoord in range(0, len(heightMap)):
-		row = ["||"]
+		row = ["|"]
 		for xCoord in range(0, len(heightMap[0])-1):
 			if abs(heightMap[yCoord][xCoord][0] - heightMap[yCoord][xCoord+1][0]) > 1:
-				row.append("||")
+				row.append("|")
 			else:
 				row.append("")
-		row.append("||")
+		row.append("|")
 		horizontalEdges.append(row)
 
 	return (horizontalEdges, verticalEdges)
@@ -69,12 +71,12 @@ def extractHeightMap(level, box, options):
 				voxel = level.blockAt(xCoord, yCoord, zCoord)
 
 				#If a non-empty voxel is found, store the height of the coordinate
-				if voxel != 0:
+				if voxel not in NONSURFACE:
 					voxelData = level.blockDataAt(xCoord, yCoord, zCoord)
 					voxelHeight = yCoord
 					break
 
-			column.append((voxelHeight, False, (voxel, voxelData)))
+			column.append((voxelHeight, (voxel, voxelData)))
 
 		heightMap.append(column)
 
