@@ -3,268 +3,435 @@ from collections import namedtuple
 from operator import mul
 from itertools import permutations, repeat
 import mcplatform
-import random
-import matplotlib.pyplot as plt
+
 import numpy as np
-import utility
+import copy
+import random
+import time
+import matplotlib.pyplot as plt
+
+# Local Imports (Utilities, Libraries, Agents)
+import PreProcessing as PreProc
+from Agent_Utility import spawn_village_entrance
+from Agent_Utility import is_free
+from Agent_Utility import DIRECTIONS
+from Agent_Utility import change_direction
+from Agent_Utility import placeBlockAt
+from Agent_Utility import divideAndFloor
+
+import AHouse_v5
 
 """
 Inputs given by the user before the filter is executed, as well as some labelling
 instructions for the user.
 """
 inputs = (
-	("Procedurally Generated Settlement Filter", "label"),
-	("Creator: Matthew Barthet", "label"),
-	)
+    ("Agent-Based Settlement Generation", "label"),
+    ("Minimum House Dimension", (3, 3, 15)),
+    ("House Size Variation", (1, 1, 6)),
+    ("House Path Length", (1, 1, 3)),
+    ("House Density (%)", (50, 0, 100)),
+    ("Street Lamp Density (%)", (5, 0, 100)),
+    ("Enforce Square Houses", True),
+    ("Maximum Street Depth Lookahead (in Houses)", (3, 1, 5)),
+    ("Minimum Width for Street Lookahead", (3, 1, 5)),
+    ("Creator: Matthew Barthet", "label"),
+)
 
-#Block ID's which are not solid, cannot be walked on.
-NONSURFACE = [0,6,8,9,17,18,31,32,37,38,39,40,50,51,59,63,75,76,78,81,82,83,86,92,99,100,103,104,105,106,111,115,127,140,141,142,161,162,166,175,176,177,199,200,207,255]
 
-roomDimensions = (3, 5)
-roomWidths = range(roomDimensions[1], roomDimensions[0], -1)
-roomDepths = range(roomDimensions[1], roomDimensions[0], -1)
-roomSizes = [[x,y] for x in roomWidths for y in roomDepths]
-
-corridorLengths = range(8, 3, -1)
-directions = [[-1, 0], [1, 0], [0, 1], [0, -1]]
-corridorPossibilities = [[x,y] for x in directions for y in corridorLengths]
-
-"""
-Filter's main function which executes the functionality desired.
-"""
+# Filter's main function which executes the functionality desired.
 def perform(level, box, options):
-	heightMap, idMap, dataMap, dimensions = extractHeightMap(level, box, options)
-	edgeMap = extractSmoothnessMap(heightMap, 1)
-	squares = extractFlatSquares(level, edgeMap, 1, heightMap, box)
-	lookAheadDiggingAgent(level, box, squares, heightMap)
-	utility.log(str(dimensions) + ", Done")
+    heightMap, idMap, dataMap, dimensions = PreProc.extractHeightMap(level, box)
+    edgeMap = PreProc.extractSmoothnessMap(heightMap, 1)
+    squares = PreProc.extractFlatSquares(edgeMap, 1)
 
-def ruleBasedDigger(level, box, squares, heightMap):
-	for currentSquare in squares:
-		agentPosition = utility.randomCoordinate(currentSquare)
-		agentPosition.append(heightMap[agentPosition[1]][agentPosition[0]] + 10)
-		squareSize = currentSquare[1][0] - currentSquare[0][0] 
+    global houseSizes, houseHeights, pathLength, streetSizes, houseDensity, lampDensity, minimum_street_width
 
-def spawnDigger(level, box, square, heightMap, freeMap):
-	while(True):
-		agentPosition = utility.generateCoordinate(square)
-		agentPosition.append(heightMap[agentPosition[1]][agentPosition[0]] + 10)
-		if attemptRoomSpawn(level, box, square, agentPosition, freeMap):
-			break
-	return agentPosition
+    house_dimensions = (options['Minimum House Dimension'], options['Minimum House Dimension'] + options['House Size Variation'])
+    houseWidths = range(house_dimensions[1], house_dimensions[0], -1)
 
-def attemptRoomSpawn(level, box, currentSquare, agentPosition, freeMap):
-	for (roomWidth, roomDepth) in random.sample(roomSizes, len(roomSizes)):
-		yRange = range(agentPosition[1] - utility.divideAndFloor(roomDepth, 2), agentPosition[1] + utility.divideAndCeil(roomDepth, 2))
-		xRange = range(agentPosition[0] - utility.divideAndFloor(roomWidth, 2), agentPosition[0] + utility.divideAndCeil(roomWidth, 2))
-		if utility.attemptPlacement(currentSquare, (xRange, yRange), freeMap):
-			freeMapRoom = utility.placeObject(level, box, currentSquare, (xRange, yRange), agentPosition, freeMap)
-			fRoom = 1
-			return True
-	return False
+    if options['Enforce Square Houses']:
+        houseSizes = [[x, x] for x in houseWidths]
+    else:
+        houseSizes = [[x, y] for x in houseWidths for y in houseWidths]
 
-def lookAheadDiggingAgent(level, box, squares, heightMap):
+    pathLength = options['House Path Length']
 
-	for currentSquare in squares:
-		squareSize = currentSquare[1][0] - currentSquare[0][0] 
-		freeMap = np.zeros((squareSize, squareSize), np.int8)
-		agentPosition = spawnDigger(level, box, currentSquare, heightMap, freeMap)
-		while(True):
-			fRoom = False
-			fCorridor = False
+    minimum_street_width = options['Minimum Width for Street Lookahead']
+    maximum_street_width = (house_dimensions[1] + pathLength) * 2
+    minimum_street_depth = house_dimensions[0] + 2
+    maximum_street_depth = (house_dimensions[0] + 3) * options['Maximum Street Depth Lookahead (in Houses)']
 
-			freeMapRoom = np.zeros((squareSize, squareSize), np.int8)
+    streetWidths = range(maximum_street_width, minimum_street_width, -1)
+    streetDepths = range(maximum_street_depth, minimum_street_depth, -1)
+    streetSizes = [[x, y] for x in streetWidths for y in streetDepths]
 
-			fRoom = attemptRoomSpawn(level, box, currentSquare, agentPosition, freeMapRoom)
-			
-			for direction, corridorLength in random.sample(corridorPossibilities, len(corridorPossibilities)):
-				corridorDimensions = [direction[0] * corridorLength, direction[1] * corridorLength]
-				if corridorDimensions[0] == 0:
-					corridorDimensions[0] = 1
-				elif corridorDimensions[1] == 0:
-					corridorDimensions[1] = 1
+    houseDensity = options['House Density (%)']
+    lampDensity = options['Street Lamp Density (%)']
 
-				directions = [1, 1]
-				if(corridorDimensions[0] < 0):
-					directions[0] = -1
-				if(corridorDimensions[1] < 0):
-					directions[1] = -1
+    master(level, box, squares, heightMap)
 
-				yRange = range(agentPosition[1], agentPosition[1] + corridorDimensions[1], directions[1])
-				xRange = range(agentPosition[0], agentPosition[0] + corridorDimensions[0], directions[0])
-					
-				if utility.attemptPlacement(currentSquare, (xRange, yRange), freeMap):
-					utility.placeObject(level, box, currentSquare, (xRange, yRange), agentPosition)
-					fCorridor = True
-					agentPosition[0] += direction[0] * corridorLength
-					agentPosition[1] += direction[1] * corridorLength
-					break
 
-			freeMap = freeMapRoom.copy()
-			if not(fRoom or fCorridor):
-				break
+coverage = []
+building_count = []
+symmetry = []
 
-def randomDiggingAgent(level, box, squares, heightMap):
+def master(level, box, squares, heightMap):
 
-	pDirectionChange = 5
-	pAddRoom = 5
-	agentPosition = utility.randomCoordinate(squares[0])
-	agentPosition.append(heightMap[agentPosition[1]][agentPosition[0]] + 15)
-	agentDirection = directions[random.randint(0, len(directions))]
+    for currentSquare in squares:
 
-	for i in range(0,100):
-		if(utility.validCoordinate(squares[0], agentPosition)):
-			utility.placeBlockAt(level, box, (agentPosition[0], agentPosition[2], agentPosition[1]), (4,0))
-			
-		if(utility.validCoordinate(squares[0], agentPosition + agentDirection)):
-			agentPosition[0] += agentDirection[0]
-			agentPosition[1] += agentDirection[1]
-		else:
-			agentDirection[0] = -agentDirection[0]
-			agentDirection[0] = -agentDirection[1]
-			pDirectionChange = 0
+        # number of runs - strictly for statistical purposes - do not do change this for generating content
+        for i in range(1):
+            
+            squareSize = currentSquare[1][0] - currentSquare[0][0]
+            freeMap = np.zeros((squareSize, squareSize), np.int8)
 
-		if random.randint(0, 100) < pDirectionChange:
-			agentDirection = directions[random.randint(0, len(directions))]
-			pDirectionChange = 0
-		else:
-			pDirectionChange += 5
+            remove_foliage(level, heightMap, currentSquare, box)
+            add_border(level, heightMap, currentSquare, box, freeMap)
 
-		if random.randint(0, 100) < pAddRoom:
-			newRoom = [random.randint(3, 7), random.randint(3,7)]
-			print newRoom
-			for yCoord in range(agentPosition[1] - newRoom[1] / 2, agentPosition[1] + newRoom[1] / 2):
-				for xCoord in range(agentPosition[0] - newRoom[0] / 2, agentPosition[0] + newRoom[0] / 2):
-					utility.placeBlockAt(level, box, (xCoord, agentPosition[2], yCoord), (4,0))
-			pAddRoom = 0
-		else:
-			pAddRoom += 5
+            agentPosition, direction = spawn_village_entrance(currentSquare, heightMap, offset=minimum_street_width + 1)
+            freeMap[int(agentPosition[2]) - currentSquare[0][1]][agentPosition[0] - currentSquare[0][0]] = 0
 
-"""
-Function which takes the edge map and identifies flat rectangular regions which can be used
-to build structures with the contructive agents further down the line.
-"""
-def extractFlatSquares(level, edgeMap, maxRoughness, heightMap, box):
-	squares = []
-	flatMap = np.zeros(edgeMap.shape, int) 
-	for yCoord in range(0, edgeMap.shape[0]):
-		for xCoord in range (0, edgeMap.shape[1]):
-			if flatMap[yCoord][xCoord] == 0:
-				if edgeMap[yCoord][xCoord] < maxRoughness:
-					flatMap[yCoord][xCoord] = 1
+            placeBlockAt(level, box, (agentPosition[0], agentPosition[1] + 1, agentPosition[2]), (0, 0))
+            activeAgents = [BuilderAgent(freeMap, copy.copy(agentPosition), level, box, currentSquare, direction)]
 
-	for repeat in range(0,3):
-		square, flatMap = extractFlatSquare(level, box, flatMap, heightMap)
-		squares.append(square)
-	return squares
+            building_count.append(0)
 
-def extractFlatSquare(level, box, flatMap, heightMap):
-	coordinates = findFlatSquare(flatMap)
-	max_height = heightMap[coordinates[0][1]][coordinates[0][0]] + 10
+            while len(activeAgents) > 0:
+                for agent in activeAgents:
+                    freeMap = agent.take_step(level, box, currentSquare, freeMap, activeAgents, heightMap)
+                    if agent.active is False:
+                        activeAgents.remove(agent)
 
-	for zCoord in range (coordinates[0][1], coordinates[1][1]):
-		for xCoord in range (coordinates[0][0], coordinates[1][0]):
-			flatMap[zCoord][xCoord] = 0
-			yCoord = heightMap[zCoord][xCoord]
-			while yCoord < max_height:
-				utility.placeBlockAt(level, box, (xCoord, yCoord, zCoord), (4, 0))
-				yCoord+=1
-	return coordinates, flatMap
+            empty_tiles = 0.0
+            full_tiles = 0.0
 
-"""
-Analyse the chunk given and extract a 2D height map representation of the terrain.
-for later use.
-"""
-def extractHeightMap(level, box, options):
-	heightMap = []
-	idMap = []
-	dataMap = []
+            for zCoord in range(currentSquare[0][1], currentSquare[1][1]):
+                for xCoord in range(currentSquare[0][0], currentSquare[1][0]):
+                    if freeMap[zCoord - currentSquare[0][1]][xCoord - currentSquare[0][0]] == 0:
+                        empty_tiles += 1
+                        if np.random.randint(0, 100) < 10:
+                            level.setBlockAt(xCoord + box.minx, int(heightMap[zCoord][xCoord] + 1), zCoord + box.minz, 38)
+                            level.setBlockDataAt(xCoord + box.minx, int(heightMap[zCoord][xCoord] + 1), zCoord + box.minz, np.random.randint(0, 8))
+                    else:
+                        full_tiles += 1
 
-	(x1,y1,z1) = (box.minx, box.miny, box.minz)
-	(x2,y2,z2) = (box.maxx, box.maxy, box.maxz)
+            plt.imshow(freeMap, cmap='gray')
+            plt.show(False)
 
-	regionWidth = x2-x1
-	regionDepth = z2-z1
-	regionHeight = 0
+            np.fill_diagonal(freeMap, 0)  # changes original array, must be careful
 
-	heightMap = np.zeros((regionDepth,regionWidth))
-	idMap = np.zeros((regionDepth,regionWidth))
-	dataMap = np.zeros((regionDepth,regionWidth))
+            overlap = (freeMap == freeMap.T) * freeMap
+            indices = np.argwhere(overlap != 0)
 
-	#Loop through the Z-Coordinate Space
-	for zCoord in np.arange(z1, z2):
-		column = []
+            symmetry.append(len(indices) / (full_tiles + empty_tiles))
+            coverage.append(full_tiles / (full_tiles + empty_tiles))
 
-		#Loop through the X-Coordinate Space
-		for xCoord in np.arange(x1, x2):
-			(voxel, voxelData) = (-1,1)
-			voxelHeight = -1
-			yCoord = box.maxy
+        # print np.average(coverage), "\t", np.average(building_count),"\t", np.average(symmetry),"\t", np.std(coverage),"\t",  np.std(building_count),"\t",  np.std(symmetry)
 
-			#Loop downward from the top of the Y-Coordinate space until the bottom
-			while yCoord >= y1:
-				yCoord -= 1
-				voxel = level.blockAt(xCoord, yCoord, zCoord)
+def remove_foliage(level, heightMap, square, box):
+    for zCoord in range(square[0][1], square[1][1]):
+        for xCoord in range(square[0][0], square[1][0]):
+            for yCoord in range(int(heightMap[zCoord][xCoord]) + 1, box.maxy):
+                if level.blockAt(box.minx + xCoord, yCoord, box.minz + zCoord) != 8 and level.blockAt(box.minx + xCoord, yCoord, box.minz + zCoord) != 9:
+                    placeBlockAt(level, box, (xCoord, yCoord, zCoord), (0, 0))
+                else:
+                    continue
 
-				#If a non-empty voxel is found, store the height of the coordinate
-				if voxel not in NONSURFACE:
-					dataMap[zCoord - z1][xCoord - x1] = level.blockDataAt(xCoord, yCoord, zCoord)
-					heightMap[zCoord - z1][xCoord - x1] = yCoord
-					idMap[zCoord - z1][xCoord - x1] = voxel
-					if yCoord > regionHeight:
-						regionHeight = yCoord
-					break
 
-	return (heightMap, idMap, dataMap, (regionWidth, regionDepth, regionHeight))
+def update_position(currentPosition, currentDirection, heightMap):
+    currentPosition[0] += currentDirection[0]
+    currentPosition[1] = heightMap[currentPosition[2]][currentPosition[0]]
+    currentPosition[2] += currentDirection[1]
+    return currentPosition
 
-"""
-Take the heightmap and compute the differences in heights between neigbouring tiles
-to construct the edgemap.  Sensitivity defines how many neighbouring tiles affect
-affect the edgemap entries.
-"""
-def extractSmoothnessMap(heightMap, sensitivity):
-	(width,depth) = heightMap.shape
-	smoothnessMap = np.zeros((width,depth))
-	for yCoord in range(0, width):
-		for xCoord in range(0, depth):
-			count = 0
-			neighbourDeltas = 0
-			referenceTile = heightMap[yCoord][xCoord]
 
-			for yOffset in range(-sensitivity, sensitivity + 1):
-				for xOffset in range(-sensitivity, sensitivity + 1):
-					if not (xOffset == 0 and yOffset == 0):
-						if (yCoord + yOffset >= 0 and yCoord + yOffset < width) and (xCoord + xOffset >= 0 and xCoord + xOffset < depth):
-							neighbourTile = heightMap[yCoord + yOffset][xCoord + xOffset]
-							neighbourDeltas += abs(referenceTile - neighbourTile)
-							count += 1
-			smoothnessMap[yCoord][xCoord] = round(neighbourDeltas / count, 1)	
-	return smoothnessMap		
+def add_border(level, heightMap, square, box, freeMap):
+    border_coordinates = []
 
-def findFlatSquare(flatMap):
-	rows = len(flatMap)
-	columns = len(flatMap[0]) 
+    for coord in range(square[0][1], square[1][1]):
+        border_coordinates.append((square[0][0], coord))
+        border_coordinates.append((square[1][0]-1, coord))
 
-	square = [[0 for k in range(columns)] for l in range(rows)]
+    for coord in range(square[0][0] + 1, square[1][0] - 1):
+        border_coordinates.append((coord, square[0][1]))
+        border_coordinates.append((coord, square[1][1]-1))
 
-	for i in range(0, rows):
-		for j in range(0, columns):
-			if (flatMap[i][j] == 1):
-				square[i][j] = min(square[i][j-1], square[i-1][j], square[i-1][j-1]) + 1
-			else:
-				square[i][j] = 0
+    for coordinate in border_coordinates:
+        level.setBlockAt(box.minx + coordinate[0], int(heightMap[coordinate[1]][coordinate[0]]) + 1, box.minz + coordinate[1], 17)
+        level.setBlockDataAt(box.minx + coordinate[0], int(heightMap[coordinate[1]][coordinate[0]]) + 1, box.minz + coordinate[1], 1)
+        freeMap[int(coordinate[1]) - square[0][1]][int(coordinate[0]) - square[0][0]] = 2
 
-	max_of_s = square[0][0]
-	max_i = 0
-	max_j = 0
 
-	for i in range(rows):
-		for j in range(columns):
-			if (max_of_s < square[i][j]):
-				max_of_s = square[i][j]
-				max_i = i
-				max_j = j
+def drill_upward(level, box, heightMap, coordinate):
+    for yCoord in range(int(heightMap[coordinate[2]][coordinate[0]]) + 1, box.maxy):
+        placeBlockAt(level, box, (coordinate[0], yCoord, coordinate[2]), (0, 0))
 
-	xRange = range(max_j, max_j - max_of_s, -1)
-	yRange = range(max_i, max_i - max_of_s, -1)
-	return ((xRange[-1], yRange[-1]), (xRange[0], yRange[0]))
+
+class BuilderAgent:
+
+    def __init__(self, freeMap, position, level, box, square, direction_code=None):
+        self.position = position
+        self.pAddBuilding = houseDensity
+        self.pAddLamp = lampDensity
+        self.pAddStreet = 10
+        self.streetLength = 0
+        self.currentLength = 0
+        self.active = True
+        self.blockCode = 4
+        self.direction_code = direction_code
+        self.direction = DIRECTIONS[direction_code]
+        self.choose_direction(level, box, square, freeMap, directionChanges=[0])
+
+    # Move the agent one voxel in the direction its facing
+    def take_step(self, level, box, square, freeMap, activeAgents, heightMap):
+
+        self.end_condition(level, box, square, freeMap, activeAgents)
+
+        # If the agent is in a valid spot, place a block and update the freeMap
+        placeBlockAt(level, box, self.position, (self.blockCode, 0))
+        freeMap[int(self.position[2]) - square[0][1]][int(self.position[0]) - square[0][0]] = 2
+
+        # Attempt to place a building on other side of the position of the agent
+        for newDirection in [-1, 1]:
+            buildingDirectionCode = change_direction(self.direction_code, newDirection)
+            buildingDirection = DIRECTIONS[buildingDirectionCode]
+
+            if random.randint(1, 100) <= self.pAddBuilding:
+                self.place_building(level, box, square, buildingDirection, freeMap, heightMap)
+            if random.randint(1, 100) <= self.pAddLamp:
+                self.place_lamp(level, box, square, buildingDirection, freeMap, heightMap)
+
+        # Move the agent one position forward in the direction it's facing and increment length counter
+        update_position(self.position, self.direction, heightMap)
+        self.currentLength += 1
+
+        # Return the latest copy of the freeMap to the master
+        return freeMap
+
+    def end_condition(self, level, box, square, freeMap, activeAgents):
+
+        # Check to see if th1e agent intersects with another street, terminating if so
+        if not self.is_street(square, freeMap):
+            self.active = False
+
+        # If the street length has been exhausted, return the kill signal for this agent
+        if self.currentLength == self.streetLength:
+            self.choose_direction(level, box, square, freeMap, activeAgents)
+            self.active = False
+
+    def is_street(self, square, freeMap):
+        if freeMap[int(self.position[2]) - square[0][1]][int(self.position[0]) - square[0][0]] == 2:
+            return False
+        return True
+
+    # Once the agent has reached the end of its street length, spawn new agents in different directions
+    def choose_direction(self, level, box, square, freeMap, activeAgents=None, directionChanges=[0, -1, 1]):
+
+        for directionChange in directionChanges:
+            for streetWidth, streetDepth in streetSizes:
+
+                build = False
+
+                # Get the direction code for the street and it's direction vector 
+                streetDirectionCode = change_direction(self.direction_code, directionChange)
+                streetDirection = DIRECTIONS[streetDirectionCode]
+                newAgentPosition = copy.copy(self.position)
+                newAgentPosition[0] += streetDirection[0]
+                newAgentPosition[2] += streetDirection[1]
+
+                if not is_free(freeMap, square, int(newAgentPosition[0]), int(newAgentPosition[2])):
+                    continue
+
+                # channelList = [[-1, 1], [1], [-1]]
+                channelList = [[-1, 1]]
+
+                for channels in channelList:
+                    if look_ahead(square, self.position, streetDirection, streetDepth, streetWidth, freeMap, channels):
+                        build = True
+                        break
+
+                if not build:
+                    continue
+
+                if activeAgents is not None:
+                    activeAgents.append(
+                        BuilderAgent(freeMap, newAgentPosition, level, box, square, streetDirectionCode))
+                    break
+                else:
+                    self.direction_code = streetDirectionCode
+                    self.direction = streetDirection
+                    self.streetLength = streetDepth
+                    self.currentLength = 0
+                    return freeMap
+
+        return freeMap
+
+    def place_lamp(self, level, box, square, lampDirection, freeMap, heightMap):
+
+        if self.currentLength == 0 or self.currentLength == self.streetLength:
+            return
+
+            # Make sure the buildings being placed will not overstep the boundary of the street
+        if not 1 < self.currentLength < self.streetLength - 1:
+            return
+
+        # Store a copy of the agents position and move it a number of steps in the direction of the building
+        agentPosition = copy.copy(self.position)
+        agentPosition[0] += lampDirection[0]
+        agentPosition[2] += lampDirection[1]
+
+        stickPosition = copy.copy(agentPosition)
+        stickPosition[0] += lampDirection[0]
+        stickPosition[2] += lampDirection[1]
+        stickPosition[1] = heightMap[stickPosition[2]][stickPosition[0]]
+
+        if is_free(freeMap, square, int(agentPosition[0]), int(agentPosition[2])) and is_free(freeMap, square, int(stickPosition[0]), int(stickPosition[2])):
+            if freeMap[int(stickPosition[2]) - square[0][1]][int(stickPosition[0]) - square[0][0]] == 2 or freeMap[int(agentPosition[2]) - square[0][1]][int(agentPosition[0]) - square[0][0]] == 2:
+                return
+
+            freeMap[int(agentPosition[2]) - square[0][1]][int(agentPosition[0]) - square[0][0]] = 1
+            freeMap[int(stickPosition[2]) - square[0][1]][int(stickPosition[0]) - square[0][0]] = 1
+
+            for lampHeight in range(1, 4):
+                placeBlockAt(level, box, (stickPosition[0], stickPosition[1] + lampHeight, stickPosition[2]), (85, 0))
+
+            placeBlockAt(level, box, (agentPosition[0], stickPosition[1] + lampHeight, agentPosition[2]), (89, 0))
+
+    # Place building adjacent to the position of the agent
+    def place_building(self, level, box, square, buildingDirection, freeMap, heightMap):
+
+        # Store a copy of the agents position and move it a number of steps in the direction of the building
+        agentPosition = copy.copy(self.position)
+        agentPosition[0] += buildingDirection[0] * pathLength
+        agentPosition[1] = heightMap[self.position[2]][self.position[0]]
+        agentPosition[2] += buildingDirection[1] * pathLength
+
+        if not is_free(freeMap, square, int(agentPosition[0]), int(agentPosition[2])) or freeMap[int(agentPosition[2]) - square[0][1]][int(agentPosition[0]) - square[0][0]] == 2:
+            return
+
+        # List to store the dimensions of the building to be built
+        buildingDimensions = []
+
+        # We now attempt to find a building which fits in the given space
+        for roomWidth, roomDepth in houseSizes:
+
+            # Make sure the buildings being placed will not overstep the boundary of the street
+            if not ((roomWidth / 2) < self.currentLength < self.streetLength - (roomWidth / 2)):
+                continue
+
+            # Check to see if the building will fit in the given space, setting the dimensions if so
+            if look_ahead(square, agentPosition, buildingDirection, roomDepth, roomWidth, freeMap, street=False):
+                buildingDimensions.append(roomWidth)
+                buildingDimensions.append(roomWidth * 1.5)
+                buildingDimensions.append(roomDepth)
+                break
+
+        # If no dimensions are found, the search has failed and so no building shall be placed
+        if len(buildingDimensions) == 0:
+            return False
+
+        buildingCenter = []
+        boxDimensions = copy.copy(buildingDimensions)
+
+        if buildingDimensions[0] % 2 != 0:
+            widthCut = 2
+        else:
+            widthCut = 1
+
+        if buildingDirection[0] == 1:
+            buildingCenter = [agentPosition[0] + 1, agentPosition[1] + 1, agentPosition[2] - divideAndFloor(buildingDimensions[2], 2) + 1]
+            boxDimensions[2] -= widthCut
+
+        elif buildingDirection[0] == -1:
+            buildingCenter = [agentPosition[0] - (buildingDimensions[0]), agentPosition[1] + 1, agentPosition[2] - divideAndFloor(buildingDimensions[2], 2) + 1]
+            boxDimensions[2] -= widthCut
+
+        elif buildingDirection[1] == 1:
+            buildingCenter = [agentPosition[0] - divideAndFloor(buildingDimensions[0], 2) + 1, agentPosition[1] + 1, agentPosition[2] + 1]
+            boxDimensions[0] -= widthCut
+
+        elif buildingDirection[1] == -1:
+            buildingCenter = [agentPosition[0] - divideAndFloor(buildingDimensions[0], 2) + 1, agentPosition[1] + 1, agentPosition[2] - buildingDimensions[2]]
+            boxDimensions[0] -= widthCut
+
+        buildingCenter[0] += box.minx
+        buildingCenter[2] += box.minz
+        newBox = BoundingBox(buildingCenter, (boxDimensions[0], buildingDimensions[1], boxDimensions[2]))
+        AHouse_v5.ahouse(level, newBox, {"Operation": "House", "Seed:": 0})
+        building_count[-1] += 1
+
+        # Now that we have a building that fits in the given space, we start by constructing a path
+        for pathStep in range(1, pathLength + 4):
+            xStep = int(self.position[0] + buildingDirection[0] * pathStep)
+            yStep = int(self.position[2] + buildingDirection[1] * pathStep)
+            placeBlockAt(level, box, (xStep, heightMap[yStep][xStep], yStep), (4, 0))
+            freeMap[yStep - square[0][1]][xStep - square[0][0]] = 1
+
+        agentPosition[1] = heightMap[self.position[2]][self.position[0]]
+
+        for step in range(0, buildingDimensions[2]):
+
+            agentPosition[0] += buildingDirection[0]
+            agentPosition[2] += buildingDirection[1]
+
+            for lateralStep in range(0, buildingDimensions[0] / 2):
+
+                if buildingDirection[0] == 0:
+                    lateralDirection = np.array([1, 0]) * lateralStep
+                else:
+                    lateralDirection = np.array([0, 1]) * lateralStep
+
+                for i in [-1, 1]:
+                    lateralPosition = [agentPosition[0] + lateralDirection[0] * i, agentPosition[2] + lateralDirection[1] * i]
+                    if lateralStep < buildingDimensions[0] / 2 and step < buildingDimensions[2]:
+                        freeMap[int(lateralPosition[1]) - square[0][1]][int(lateralPosition[0]) - square[0][0]] = 1
+
+        return True
+
+
+def look_ahead(square, position, direction, lookDepth, lookWidth, freeMap, channels=[-1, 1],
+               street=True):
+
+    # Store a copy of the agent position for the lookahead
+    agentPosition = copy.copy(position)
+
+    for step in range(0, lookDepth):
+
+        # Move one position forward in the direction of the potential street
+        agentPosition[0] += direction[0]
+        agentPosition[2] += direction[1]
+
+        # If an existing object is found, this space is not available
+        if not is_free(freeMap, square, int(agentPosition[0]), int(agentPosition[2])):
+            return False
+
+        # If an existing street is found, return true to join the the original street with this one
+        if freeMap[int(agentPosition[2]) - square[0][1]][int(agentPosition[0]) - square[0][0]] == 2:
+            if not street:
+                return False
+
+        # Perform steps in either perpendicular direction and check if the positions are free, acting accordingly
+        for lateralStep in range(1, divideAndFloor(lookWidth, 2) + 1):
+            if direction[0] == 0:
+                lateralDirection = np.array([1, 0]) * lateralStep
+            else:
+                lateralDirection = np.array([0, 1]) * lateralStep
+            for distance in channels:
+                lateralPosition = [agentPosition[0] + lateralDirection[0] * distance, agentPosition[2] + lateralDirection[1] * distance]
+                if not is_free(freeMap, square, int(lateralPosition[0]), int(lateralPosition[1])):
+                    return False
+                if freeMap[int(lateralPosition[1]) - square[0][1]][int(lateralPosition[0]) - square[0][0]] == 2:
+                    return False
+
+    # If placing a building we can stop here
+    if not street:
+        return True
+
+    # Now we "book" the space for this street - set the freeMap value to 1 so that other agents ignore the space
+    agentPosition = copy.copy(position)
+    for _ in range(0, lookDepth):
+        freeMap[agentPosition[2] - square[0][1]][agentPosition[0] - square[0][0]] = 1
+        agentPosition[0] += direction[0]
+        agentPosition[2] += direction[1]
+        return True
