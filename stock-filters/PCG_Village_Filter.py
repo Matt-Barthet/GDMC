@@ -60,8 +60,9 @@ def convert_to_integer(lattice):
 
 
 def place_lattice_from_file(level, box, options):
-    original = np.load("./stock-filters/lattices/" + options['Building Name'])
+    original = np.load("./stock-filters/buildings/" + options['Building Name'])
     original = original.astype(int)
+    original = np.rot90(original)
     for i in range(20):
         for j in range(20):
             for k in range(20):
