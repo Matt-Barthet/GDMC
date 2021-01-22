@@ -8,6 +8,7 @@ import numpy as np
 import copy
 import random
 import time
+import os
 import matplotlib.pyplot as plt
 
 # Local Imports (Utilities, Libraries, Agents)
@@ -21,27 +22,56 @@ from Agent_Utility import divideAndFloor
 
 import AHouse_v5
 
+"""("Agent-Based Settlement Generation", "label"),
+("Minimum House Dimension", (3, 3, 20)),
+("House Size Variation", (1, 1, 6)),
+("House Path Length", (1, 1, 3)),
+("House Density (%)", (50, 0, 100)),
+("Street Lamp Density (%)", (5, 0, 100)),
+("Enforce Square Houses", True),
+("Maximum Street Depth Lookahead (in Houses)", (3, 1, 5)),
+("Minimum Width for Street Lookahead", (3, 1, 5)),
+("Creator: Matthew Barthet", "label"),"""
+
 """
 Inputs given by the user before the filter is executed, as well as some labelling
 instructions for the user.
 """
 inputs = (
-    ("Agent-Based Settlement Generation", "label"),
-    ("Minimum House Dimension", (3, 3, 15)),
-    ("House Size Variation", (1, 1, 6)),
-    ("House Path Length", (1, 1, 3)),
-    ("House Density (%)", (50, 0, 100)),
-    ("Street Lamp Density (%)", (5, 0, 100)),
-    ("Enforce Square Houses", True),
-    ("Maximum Street Depth Lookahead (in Houses)", (3, 1, 5)),
-    ("Minimum Width for Street Lookahead", (3, 1, 5)),
-    ("Creator: Matthew Barthet", "label"),
+    ("Building Name", ("string", "value=")),
 )
+
+mapping = [0, 0, 5, 4, 17]
+
+def convert_to_integer(lattice):
+    """
+    Convert material lattice from one-hot representation to integer encoding representation.
+
+    :param lattice: lattice of one-hot material vectors.
+    :return: lattice of integer material codes.
+    """
+
+    integer_reconstruct = np.zeros((20, 20, 20))
+    for channel in range(20):
+        for row in range(20):
+            print(row)
+            integer_reconstruct[channel][row] = np.argmax(lattice[channel][row], axis=1)
+    return integer_reconstruct
+
+
+def place_lattice_from_file(level, box, options):
+    original = np.load("./stock-filters/lattices/" + options['Building Name'])
+    original = original.astype(int)
+    for i in range(20):
+        for j in range(20):
+            for k in range(20):
+                level.setBlockAt(box.minx + i, box.miny + k, box.maxz - j, mapping[original[i][j][k]])
 
 
 # Filter's main function which executes the functionality desired.
 def perform(level, box, options):
-    heightMap, idMap, dataMap, dimensions = PreProc.extractHeightMap(level, box)
+    place_lattice_from_file(level, box, options)
+    """heightMap, idMap, dataMap, dimensions = PreProc.extractHeightMap(level, box)
     edgeMap = PreProc.extractSmoothnessMap(heightMap, 1)
     squares = PreProc.extractFlatSquares(edgeMap, 1)
 
@@ -69,12 +99,12 @@ def perform(level, box, options):
     houseDensity = options['House Density (%)']
     lampDensity = options['Street Lamp Density (%)']
 
-    master(level, box, squares, heightMap)
-
+    master(level, box, squares, heightMap)"""
 
 coverage = []
 building_count = []
 symmetry = []
+
 
 def master(level, box, squares, heightMap):
 
@@ -358,7 +388,7 @@ class BuilderAgent:
         buildingCenter[0] += box.minx
         buildingCenter[2] += box.minz
         newBox = BoundingBox(buildingCenter, (boxDimensions[0], buildingDimensions[1], boxDimensions[2]))
-        AHouse_v5.ahouse(level, newBox, {"Operation": "House", "Seed:": 0})
+        #AHouse_v5.ahouse(level, newBox, {"Operation": "House", "Seed:": 0})
         building_count[-1] += 1
 
         # Now that we have a building that fits in the given space, we start by constructing a path
